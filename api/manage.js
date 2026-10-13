@@ -19,9 +19,10 @@ module.exports=async function handler(req,res){
   const send=(status,data)=>res.status(status).json(data);
   const action=req.query.action;const secret=(process.env.ADMIN_PASSWORD || process.env.coachjames3);
   try{
-    if(req.method==='GET'&&action==='catalog'){try{return send(200,await catalog())}catch(e){console.error('Catalog storage unavailable',e.name);return send(503,{error:'Inventory storage is temporarily unavailable'})}}
+    if(req.method==='GET'&&action==='catalog'){try{const data=await catalog();return send(200,{...data,shoes:data.shoes.filter(s=>s.status!=='sold')})}catch(e){console.error('Catalog storage unavailable',e.name);return send(503,{error:'Inventory storage is temporarily unavailable'})}}
     const token=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(cookie+'='))?.slice(cookie.length+1);
     if(req.method==='GET'&&action==='session')return send(200,{authenticated:valid(token,secret),configured:!!secret&&secret.length>=20});
+    if(req.method==='GET'&&action==='inventory'){if(!valid(token,secret))return send(401,{error:'Please sign in again'});return send(200,await catalog())}
     if(req.method!=='POST')return send(405,{error:'Method not allowed'});
     if(!sameOrigin(req))return send(403,{error:'Please use this website to make changes'});
     if(action==='logout'){res.setHeader('Set-Cookie',`${cookie}=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0`);return send(200,{ok:true})}
@@ -34,7 +35,19 @@ module.exports=async function handler(req,res){
       attempts.delete(ip);res.setHeader('Set-Cookie',`${cookie}=${session(secret)}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=28800`);return send(200,{ok:true});
     }
     if(!valid(token,secret))return send(401,{error:'Please sign in again'});
-    const current=await catalog();const existing=current.shoes.find(s=>s.id===Number(body.id));if(!existing)return send(404,{error:'Listing not found'});
+    const current=await catalog();
+    const write=async shoes=>{const {put}=await import('@vercel/blob');return put(path,JSON.stringify(shoes),{access:'public',contentType:'application/json',addRandomSuffix:false,allowOverwrite:current.revision!=='seed',cacheControlMaxAge:60,...(current.revision!=='seed'?{ifMatch:current.revision}:{})})};
+    if(['create','save','status'].includes(action)&&body.revision!==current.revision)return send(409,{error:'Inventory changed in another session. Reload before saving.'});
+    if(action==='create'){
+      const id=Math.max(0,...current.shoes.map(s=>s.id))+1;
+      let shoe;try{shoe=cleanEdit(body.listing,{id,status:'active'});if(shoe.photos.length)throw Error('Save the new shoe before adding photos')}catch(e){return send(400,{error:e.message})}
+      const result=await write([...current.shoes,shoe]);return send(200,{shoe,revision:result.etag});
+    }
+    const existing=current.shoes.find(s=>s.id===Number(body.id));if(!existing)return send(404,{error:'Listing not found'});
+    if(action==='status'){
+      if(!['active','sold'].includes(body.status))return send(400,{error:'Invalid listing status'});
+      const shoe={...existing,status:body.status};const result=await write(current.shoes.map(s=>s.id===existing.id?shoe:s));return send(200,{shoe,revision:result.etag});
+    }
     if(action==='upload'){
       if(typeof body.data!=='string'||body.data.length>4200000||!/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(body.data))return send(400,{error:'Choose a JPEG photo under 3 MB'});
       const bytes=Buffer.from(body.data.split(',')[1],'base64');if(bytes.length<4||bytes.length>3*1024*1024||bytes[0]!==255||bytes[1]!==216||bytes[2]!==255)return send(400,{error:'Invalid JPEG photo'});
@@ -46,7 +59,7 @@ module.exports=async function handler(req,res){
       const {head,put}=await import('@vercel/blob');
       for(const photo of updated.photos){let u;try{u=new URL(photo)}catch{return send(400,{error:'Invalid photo URL'})}if(u.protocol!=='https:'||!u.hostname.endsWith('.public.blob.vercel-storage.com')||!u.pathname.startsWith(`/photos/${existing.id}/`))return send(400,{error:'Invalid photo URL'});const info=await head(photo);if(info.contentType!=='image/jpeg')return send(400,{error:'Invalid photo'})}
       const shoes=current.shoes.map(s=>s.id===existing.id?updated:s);
-      const result=await put(path,JSON.stringify(shoes),{access:'public',contentType:'application/json',addRandomSuffix:false,allowOverwrite:current.revision!=='seed',cacheControlMaxAge:60,...(current.revision!=='seed'?{ifMatch:current.revision}:{})});
+      const result=await write(shoes);
       return send(200,{shoe:updated,revision:result.etag});
     }
     return send(404,{error:'Unknown action'});
