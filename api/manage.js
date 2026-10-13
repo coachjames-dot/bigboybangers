@@ -41,5 +41,5 @@ module.exports=async function handler(req,res){
       return send(200,{shoe:updated,revision:result.etag});
     }
     return send(404,{error:'Unknown action'});
-  }catch(e){console.error('Admin operation failed',e.name);return send(/Precondition|AlreadyExists/.test(e.name)?409:500,{error:/Precondition|AlreadyExists/.test(e.name)?'Inventory changed. Reload before saving.':'Could not complete the request. Please try again.'})}
+  }catch(e){console.error('Admin operation failed',e.name,String(e.message).replace(secret||'__absent__','[redacted]').replace(/https?:\S+/g,'[URL]').replace(/[A-Za-z0-9_-]{40,}/g,'[redacted]'));return send(/Precondition|AlreadyExists/.test(e.name)?409:500,{error:/Precondition|AlreadyExists/.test(e.name)?'Inventory changed. Reload before saving.':'Could not complete the request. Please try again.'})}
 };
