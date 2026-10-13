@@ -8,7 +8,7 @@ async function catalog(){const {get}=await import('@vercel/blob');const r=await 
 module.exports=async function handler(req,res){
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   const send=(status,data)=>res.status(status).json(data);
-  const action=req.query.action;const secret=process.env.ADMIN_PASSWORD;
+  const action=req.query.action;const secret=(process.env.ADMIN_PASSWORD || process.env.coachjames3);
   try{
     if(req.method==='GET'&&action==='catalog'){try{return send(200,await catalog())}catch(e){console.error('Catalog storage unavailable',e.name);return send(503,{error:'Inventory storage is temporarily unavailable'})}}
     const token=(req.headers.cookie||'').split(';').map(s=>s.trim()).find(s=>s.startsWith(cookie+'='))?.slice(cookie.length+1);
