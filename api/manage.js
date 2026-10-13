@@ -4,7 +4,16 @@ const crypto=require('node:crypto');
 const attempts=new Map();
 const cookie='__Host-bbb_admin';
 const path='catalog/inventory.json';
-async function catalog(){const {get}=await import('@vercel/blob');const r=await get(path,{access:'public',useCache:false});if(!r)return {shoes:structuredClone(seed),revision:'seed'};return {shoes:await new Response(r.stream).json(),revision:r.blob.etag}}
+async function catalog(){
+  const {get,head}=await import('@vercel/blob');
+  for(let attempt=0;attempt<3;attempt++){
+    let before;try{before=await head(path)}catch(e){if(/NotFound/.test(e.name))return {shoes:structuredClone(seed),revision:'seed'};throw e}
+    const r=await get(path,{access:'public',useCache:false});if(!r)continue;
+    const shoes=await new Response(r.stream).json();const after=await head(path);
+    if(before.etag===after.etag)return {shoes,revision:after.etag};
+  }
+  throw new Error('Inventory changed during read. Please reload.');
+}
 module.exports=async function handler(req,res){
   res.setHeader('Cache-Control','no-store');res.setHeader('X-Content-Type-Options','nosniff');
   const send=(status,data)=>res.status(status).json(data);
@@ -41,5 +50,5 @@ module.exports=async function handler(req,res){
       return send(200,{shoe:updated,revision:result.etag});
     }
     return send(404,{error:'Unknown action'});
-  }catch(e){console.error('Admin operation failed',e.name,String(e.message).replace(secret||'__absent__','[redacted]').replace(/https?:\S+/g,'[URL]').replace(/[A-Za-z0-9_-]{40,}/g,'[redacted]'));return send(/Precondition|AlreadyExists/.test(e.name)?409:500,{error:/Precondition|AlreadyExists/.test(e.name)?'Inventory changed. Reload before saving.':'Could not complete the request. Please try again.'})}
+  }catch(e){console.error('Admin operation failed',e.name,String(e.message).replace(secret||'__absent__','[redacted]').replace(/https?:\S+/g,'[URL]').replace(/[A-Za-z0-9_-]{40,}/g,'[redacted]'));return send(/Precondition|AlreadyExists|ETag mismatch/.test(e.name+' '+e.message)?409:500,{error:/Precondition|AlreadyExists|ETag mismatch/.test(e.name+' '+e.message)?'Inventory changed. Reload before saving.':'Could not complete the request. Please try again.'})}
 };
