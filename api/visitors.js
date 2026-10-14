@@ -7,7 +7,7 @@ function recognized(token,secret){if(!token||!secret)return false;const parts=to
 async function read(){
   const {head,get}=await import('@vercel/blob');
   for(let attempt=0;attempt<3;attempt++){
-    let before;try{before=await head(path)}catch(e){if(/NotFound|not found/i.test(e.name+' '+e.message))return {count:0,startedAt:null,revision:null};throw e}
+    let before;try{before=await head(path)}catch(e){const missing=await get(path,{access:'public',useCache:false});if(!missing)return {count:0,startedAt:null,revision:null};throw e}
     const r=await get(path,{access:'public',useCache:false});if(!r)continue;
     const value=await new Response(r.stream).json();const after=await head(path);
     if(before.etag===after.etag){if(!Number.isSafeInteger(value.count)||value.count<0)throw Error('Invalid visitor count');return {...value,revision:after.etag}}
@@ -34,5 +34,5 @@ module.exports=async(req,res)=>{
       }catch(e){if(!/Precondition|AlreadyExists|ETag mismatch|already exists/i.test(e.name+' '+e.message))throw e}
     }
     return send(503,{error:'Visitor count is busy. Please try again.'});
-  }catch(e){console.error('Visitor count unavailable',e.name);return send(503,{error:'Visitor count unavailable'})}
+  }catch(e){console.error('Visitor count unavailable',e.name,String(e.message).replace(secret,'[redacted]').replace(/https?:\S+/g,'[URL]').replace(/[A-Za-z0-9_-]{40,}/g,'[redacted]'));return send(503,{error:'Visitor count unavailable'})}
 };
